@@ -1,0 +1,29 @@
+{
+  "vaults": [
+    {
+      "key": "spyx",
+      "label": "Kraken Earn SPYx",
+      "symbol": "wSPYx",
+      "balance": 16.997520125683234,
+      "usd": 12968.123791863814,
+      "alloc90": 15.297768
+    },
+    {
+      "key": "qqqx",
+      "label": "Kraken Earn QQQx",
+      "symbol": "wQQQx",
+      "balance": 5.342350162338546,
+      "usd": 3762.1325403016044,
+      "alloc90": 4.808115
+    },
+    {
+      "key": "nvdax",
+      "label": "Kraken Earn NVDAx",
+      "symbol": "wNVDAx",
+      "balance": 42.949717617159976,
+      "usd": 9129.972451850112,
+      "alloc90": 38.654745
+    }
+  ],
+  "fetchedAt": "2026-09-14T13:04:46.511Z"
+}

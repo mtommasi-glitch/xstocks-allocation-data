@@ -4,26 +4,26 @@
       "key": "spyx",
       "label": "Kraken Earn SPYx",
       "symbol": "wSPYx",
-      "balance": 27.35124618706657,
-      "usd": 20832.015139846542,
-      "alloc90": 24.616121
+      "balance": 26.011064803749207,
+      "usd": 19871.946443046814,
+      "alloc90": 23.409958
     },
     {
       "key": "qqqx",
       "label": "Kraken Earn QQQx",
       "symbol": "wQQQx",
-      "balance": 0.4522263817173933,
-      "usd": 319.5251468366412,
-      "alloc90": 0.407003
+      "balance": 27.9642473728582,
+      "usd": 19858.34538130517,
+      "alloc90": 25.167822
     },
     {
       "key": "nvdax",
       "label": "Kraken Earn NVDAx",
       "symbol": "wNVDAx",
-      "balance": 6.532914419753824,
-      "usd": 1387.0918478445406,
-      "alloc90": 5.879622
+      "balance": 36.06791630674931,
+      "usd": 7706.735635444528,
+      "alloc90": 32.461124
     }
   ],
-  "fetchedAt": "2026-09-15T19:15:11.777Z"
+  "fetchedAt": "2026-09-16T11:51:13.111Z"
 }

@@ -1,0 +1,34 @@
+name: Refresh xStocks Allocation Data
+
+# Keeps data.json's idle-balance snapshot fresh (7 days/week, weekends included) so the
+# xStocks Allocation Slack routine's 3-hour staleness check never blocks a scheduled post.
+# Runs here rather than in a Claude cloud routine because it needs the DEBANK_API_KEY secret
+# and plain outbound HTTPS to pro-openapi.debank.com — a GitHub-hosted runner, not a routine
+# sandbox behind an egress proxy (see kraken-earn-dashboard's boosted-usdc-aave-alert.yml for
+# the same pattern applied to a different vault's on-chain check).
+on:
+  schedule:
+    - cron: '20 * * * *' # hourly, well inside the 3h staleness window
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node refresh-data.mjs
+        env:
+          DEBANK_API_KEY: ${{ secrets.DEBANK_API_KEY }}
+      - name: Commit data.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data.json
+          git diff --staged --quiet || git commit -m "Refresh xStocks allocation data"
+          git push

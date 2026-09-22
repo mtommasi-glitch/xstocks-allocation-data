@@ -17,7 +17,7 @@
 //
 // Also computes withdrawal-queue awareness: queueAmount (pending redemptions, native units,
 // from Veda's boringQueue API — same source kraken-earn-dashboard's fetchXstocksBoringQueuePending
-// uses) and queueBuffered (queueAmount × 1.10, a 10% cushion since this data is only refreshed
+// uses) and queueBuffered (queueAmount × 1.20, a 20% cushion since this data is only refreshed
 // hourly and the queue can grow before an OPS ticket gets executed). allocatable is idle minus
 // that buffered reserve — alloc90 and the 5%-materiality check now apply to allocatable, not raw
 // idle, so the routine never proposes moving idle that's actually needed to cover withdrawals.
@@ -25,8 +25,8 @@
 // this is a real scenario that already happened once (see ticket 1357, 2026-09-20: NVDAx idle
 // hit 0 while its queue was 181.48) and the Allocation routines branch to a Disassemble+Withdraw
 // ticket pair for that vault when this is set, overriding the normal Allocate flow entirely.
-// disassembleAmount targets restoring idle to 2× the buffered queue (not just the bare shortfall)
-// so the same vault doesn't need another emergency Disassemble the very next cycle.
+// disassembleAmount is queueBuffered minus what's already idle — the top-up needed to reach the
+// buffered target, already accounting for existing idle, never more than the actual shortfall.
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -98,7 +98,11 @@ async function fetchVaultIdle(vault) {
   return { balance, usd };
 }
 
-const QUEUE_BUFFER_MULT = 1.10; // 10% cushion above the live queue reading
+const QUEUE_BUFFER_MULT = 1.20; // 20% cushion above the live queue reading — this is the one and
+// only target reserve. Earlier version compounded a 10% cushion with a separate "restore to 2x"
+// disassemble target, which produced a disassembleAmount roughly 2.2x the raw queue (e.g. 376 vs
+// a 184 queue) — clearly excessive. Now there's exactly one number (queue x 1.20) and both
+// allocatable and disassembleAmount are computed as (that number) vs. what's already idle.
 
 async function main() {
   const results = [];
@@ -120,10 +124,10 @@ async function main() {
       const allocatableUsd = allocatable * price;
       allocatablePct = (allocatableUsd + deployedUsd) > 0 ? (allocatableUsd / (allocatableUsd + deployedUsd)) * 100 : 0;
     } else {
+      // disassembleAmount already accounts for what's idle — it's the top-up needed to reach the
+      // buffered target, not the target itself, so it's never larger than what's actually short.
       shortfall         = queueBuffered - balance;
-      // Target 2x the buffered queue after disassembling, not just the bare shortfall, so this
-      // vault doesn't need another emergency Disassemble the very next cycle.
-      disassembleAmount = floor6((2 * queueBuffered) - balance);
+      disassembleAmount = floor6(queueBuffered - balance);
     }
 
     results.push({

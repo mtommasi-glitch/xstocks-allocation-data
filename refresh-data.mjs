@@ -14,6 +14,19 @@
 // addresses, not the Solana Position Manager account). The Allocation routines use idlePct to
 // skip a vault when there isn't enough idle balance, relative to the vault's size, to be worth
 // moving.
+//
+// Also computes withdrawal-queue awareness: queueAmount (pending redemptions, native units,
+// from Veda's boringQueue API — same source kraken-earn-dashboard's fetchXstocksBoringQueuePending
+// uses) and queueBuffered (queueAmount × 1.10, a 10% cushion since this data is only refreshed
+// hourly and the queue can grow before an OPS ticket gets executed). allocatable is idle minus
+// that buffered reserve — alloc90 and the 5%-materiality check now apply to allocatable, not raw
+// idle, so the routine never proposes moving idle that's actually needed to cover withdrawals.
+// If idle can't even cover the buffered queue, shortfall/disassembleAmount are set instead —
+// this is a real scenario that already happened once (see ticket 1357, 2026-09-20: NVDAx idle
+// hit 0 while its queue was 181.48) and the Allocation routines branch to a Disassemble+Withdraw
+// ticket pair for that vault when this is set, overriding the normal Allocate flow entirely.
+// disassembleAmount targets restoring idle to 2× the buffered queue (not just the bare shortfall)
+// so the same vault doesn't need another emergency Disassemble the very next cycle.
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -41,6 +54,15 @@ async function fetchKaminoNetValue(marketPubkey, walletAddr) {
   const stats = o?.refreshedStats;
   if (!stats) throw new Error('Kamino returned no obligation stats');
   return parseFloat(stats.netAccountValue) || 0;
+}
+
+async function fetchQueueAmount(chain, boringVaultAddr) {
+  const url = `https://api.sevenseas.capital/boringQueue/${chain}/${boringVaultAddr.toLowerCase()}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Veda ${res.status}`);
+  const data = await res.json();
+  const openReqs = data?.Response?.open_requests || [];
+  return openReqs.reduce((sum, r) => sum + parseFloat(r.wantTokenAmount || '0'), 0);
 }
 
 async function debank(endpoint, params, retriesLeft = 2) {
@@ -76,6 +98,8 @@ async function fetchVaultIdle(vault) {
   return { balance, usd };
 }
 
+const QUEUE_BUFFER_MULT = 1.10; // 10% cushion above the live queue reading
+
 async function main() {
   const results = [];
   for (const vault of VAULTS) {
@@ -83,15 +107,40 @@ async function main() {
     if (balance <= 0) throw new Error(`${vault.key}: no idle xStocks balance found on DeBank — refusing to write a zeroed allocation`);
     const deployedUsd = await fetchKaminoNetValue(KAMINO_MARKET, vault.positionManager);
     const idlePct = (usd / (usd + deployedUsd)) * 100;
+
+    const queueAmount   = await fetchQueueAmount('ink', vault.boringVault);
+    const queueBuffered = queueAmount * QUEUE_BUFFER_MULT;
+
+    const price = balance > 0 ? usd / balance : 0; // USD per native unit, from the idle leg itself
+
+    let allocatable = 0, alloc90 = 0, allocatablePct = 0, shortfall = 0, disassembleAmount = 0;
+    if (balance >= queueBuffered) {
+      allocatable = balance - queueBuffered;
+      alloc90     = floor6(allocatable * 0.9);
+      const allocatableUsd = allocatable * price;
+      allocatablePct = (allocatableUsd + deployedUsd) > 0 ? (allocatableUsd / (allocatableUsd + deployedUsd)) * 100 : 0;
+    } else {
+      shortfall         = queueBuffered - balance;
+      // Target 2x the buffered queue after disassembling, not just the bare shortfall, so this
+      // vault doesn't need another emergency Disassemble the very next cycle.
+      disassembleAmount = floor6((2 * queueBuffered) - balance);
+    }
+
     results.push({
       key: vault.key,
       label: vault.label,
       symbol: vault.symbol,
       balance,
       usd,
-      alloc90: floor6(balance * 0.9),
       deployedUsd,
       idlePct,
+      queueAmount,
+      queueBuffered,
+      allocatable,
+      alloc90,
+      allocatablePct,
+      shortfall,
+      disassembleAmount,
     });
   }
 

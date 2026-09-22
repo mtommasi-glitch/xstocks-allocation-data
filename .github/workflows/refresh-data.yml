@@ -8,7 +8,9 @@ name: Refresh xStocks Allocation Data
 # the same pattern applied to a different vault's on-chain check).
 on:
   schedule:
-    - cron: '20 * * * *' # hourly, well inside the 3h staleness window
+    - cron: '20 * * * *'    # hourly, well inside the 3h staleness window
+    - cron: '15 12 * * 1-5' # 5 min before the AM Allocation cycle fires (12:20 UTC weekdays)
+    - cron: '25 19 * * 1-5' # 5 min before the PM Allocation cycle fires (19:30 UTC weekdays)
   workflow_dispatch: {}
 
 permissions:

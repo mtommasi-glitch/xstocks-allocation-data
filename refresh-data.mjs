@@ -148,6 +148,16 @@ async function main() {
     });
   }
 
+  // Self-check: never write a file missing the fields the Allocation routines depend on. This
+  // guards this script's own output — it can't stop something else from overwriting the file
+  // afterward, but it ensures this pipeline itself never silently produces incomplete data.
+  const REQUIRED_KEYS = ['key', 'label', 'symbol', 'balance', 'usd', 'deployedUsd', 'idlePct',
+    'queueAmount', 'queueBuffered', 'allocatable', 'alloc90', 'allocatablePct', 'shortfall', 'disassembleAmount'];
+  for (const v of results) {
+    const missing = REQUIRED_KEYS.filter(k => !(k in v));
+    if (missing.length) throw new Error(`${v.key}: refusing to write — missing fields: ${missing.join(', ')}`);
+  }
+
   const out = { vaults: results, fetchedAt: new Date().toISOString() };
   fs.writeFileSync(DATA_FILE, JSON.stringify(out, null, 2) + '\n');
   console.log('Wrote', DATA_FILE, '-', JSON.stringify(out));

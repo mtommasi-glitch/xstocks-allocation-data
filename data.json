@@ -4,50 +4,26 @@
       "key": "spyx",
       "label": "Kraken Earn SPYx",
       "symbol": "wSPYx",
-      "balance": 24.21592566145655,
-      "usd": 18573.009584195635,
-      "deployedUsd": 138343.85406982584,
-      "idlePct": 11.836210048874277,
-      "queueAmount": 5.256301295604778,
-      "queueBuffered": 6.307561554725733,
-      "allocatable": 17.908364106730815,
-      "alloc90": 16.117527,
-      "allocatablePct": 9.03165892430922,
-      "shortfall": 0,
-      "disassembleAmount": 0
+      "balance": 24.094049751073477,
+      "usd": 18605.369717939808,
+      "alloc90": 21.684644
     },
     {
       "key": "qqqx",
       "label": "Kraken Earn QQQx",
       "symbol": "wQQQx",
-      "balance": 10.497320983414522,
-      "usd": 7756.260528225322,
-      "deployedUsd": 79658.84668501493,
-      "idlePct": 8.872906269284455,
-      "queueAmount": 1.691279922687952,
-      "queueBuffered": 2.0295359072255423,
-      "allocatable": 8.46778507618898,
-      "alloc90": 7.621006,
-      "allocatablePct": 7.282359189628526,
-      "shortfall": 0,
-      "disassembleAmount": 0
+      "balance": 10.4781028583723,
+      "usd": 7787.322985283568,
+      "alloc90": 9.430292
     },
     {
       "key": "nvdax",
       "label": "Kraken Earn NVDAx",
       "symbol": "wNVDAx",
-      "balance": 11.098834426046727,
-      "usd": 2490.6117417081637,
-      "deployedUsd": 69013.77767207015,
-      "idlePct": 3.483159232778852,
-      "queueAmount": 2.8008309705577186,
-      "queueBuffered": 3.360997164669262,
-      "allocatable": 7.737837261377464,
-      "alloc90": 6.964053,
-      "allocatablePct": 2.4542610378261376,
-      "shortfall": 0,
-      "disassembleAmount": 0
+      "balance": 12.649820270684387,
+      "usd": 2853.395721423509,
+      "alloc90": 11.384838
     }
   ],
-  "fetchedAt": "2026-09-23T17:12:52.007Z"
+  "fetchedAt": "2026-09-23T19:15:52.960Z"
 }

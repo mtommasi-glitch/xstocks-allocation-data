@@ -6,15 +6,30 @@ name: Refresh xStocks Allocation Data
 # and plain outbound HTTPS to pro-openapi.debank.com — a GitHub-hosted runner, not a routine
 # sandbox behind an egress proxy (see kraken-earn-dashboard's boosted-usdc-aave-alert.yml for
 # the same pattern applied to a different vault's on-chain check).
+#
+# GitHub's scheduler is best-effort: scheduled runs are routinely delayed or silently dropped
+# (on 2026-09-28 neither the hourly run nor the single 12:15 pre-cycle run fired between 07:02
+# and 12:38 UTC, so the AM routine found 5.5h-old data and skipped). So instead of one
+# pre-cycle run, the AM window gets a burst of attempts every 10 min from 11:33 to 12:13 UTC —
+# any one of them landing is enough. Minutes avoid :00, when GitHub drops the most runs.
+# The AM Allocation routine itself also re-checks every 5 min for up to 60 min if it still
+# finds stale data, so a late refresh here is picked up rather than skipping the cycle.
+# (The PM Allocation cycle was retired on 2026-09-28; its pre-cycle run was removed.)
 on:
   schedule:
-    - cron: '20 * * * *'    # hourly, well inside the 3h staleness window
-    - cron: '15 12 * * 1-5' # 5 min before the AM Allocation cycle fires (12:20 UTC weekdays)
-    - cron: '25 19 * * 1-5' # 5 min before the PM Allocation cycle fires (19:30 UTC weekdays)
+    - cron: '20 * * * *'                  # hourly, well inside the 3h staleness window
+    - cron: '33,43,53 11 * * 1-5'         # AM pre-cycle burst (routine fires 12:20 UTC weekdays)
+    - cron: '3,13 12 * * 1-5'             # AM pre-cycle burst, continued
   workflow_dispatch: {}
 
 permissions:
   contents: write
+
+# Several burst runs can overlap when GitHub delivers them late in a clump; serialize them so
+# the pushes don't race each other.
+concurrency:
+  group: refresh-data
+  cancel-in-progress: false
 
 jobs:
   refresh:
@@ -24,7 +39,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: node refresh-data.mjs
+      # Retry transient DeBank/Kamino API failures: up to 3 attempts, 60s apart.
+      - name: Refresh data.json
+        run: |
+          for attempt in 1 2 3; do
+            node refresh-data.mjs && exit 0
+            echo "Attempt $attempt failed"
+            [ "$attempt" -lt 3 ] && sleep 60
+          done
+          exit 1
         env:
           DEBANK_API_KEY: ${{ secrets.DEBANK_API_KEY }}
       - name: Commit data.json
@@ -32,5 +55,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data.json
-          git diff --staged --quiet || git commit -m "Refresh xStocks allocation data"
-          git push
+          git diff --staged --quiet && exit 0
+          git commit -m "Refresh xStocks allocation data"
+          for attempt in 1 2 3; do
+            git pull --rebase -X theirs origin main && git push && exit 0
+            sleep 10
+          done
+          exit 1

@@ -19,8 +19,9 @@
 // from Veda's boringQueue API — same source kraken-earn-dashboard's fetchXstocksBoringQueuePending
 // uses) and queueBuffered (queueAmount × 1.20, a 20% cushion since this data is only refreshed
 // hourly and the queue can grow before an OPS ticket gets executed). allocatable is idle minus
-// that buffered reserve — alloc90 and the 5%-materiality check now apply to allocatable, not raw
-// idle, so the routine never proposes moving idle that's actually needed to cover withdrawals.
+// that buffered reserve and minus a 5% idle buffer (bufferReserve, see IDLE_BUFFER_PCT) — alloc90
+// and the materiality check apply to allocatable, not raw idle, so the routine never proposes
+// moving idle that's needed to cover withdrawals or that would take the vault below 5% idle.
 // If idle can't even cover the buffered queue, shortfall/disassembleAmount are set instead —
 // this is a real scenario that already happened once (see ticket 1357, 2026-09-20: NVDAx idle
 // hit 0 while its queue was 181.48) and the Allocation routines branch to a Disassemble+Withdraw
@@ -104,6 +105,13 @@ const QUEUE_BUFFER_MULT = 1.20; // 20% cushion above the live queue reading — 
 // a 184 queue) — clearly excessive. Now there's exactly one number (queue x 1.20) and both
 // allocatable and disassembleAmount are computed as (that number) vs. what's already idle.
 
+// Idle buffer kept in the vault after every allocation, as a share of total vault value (idle +
+// deployed). allocatable used to be everything above the queue, so an executed ticket left the
+// vault at ~2-4% idle (2026-10-01: SPYx ended at 3.8%, QQQx at 2.2%). It's now only the excess
+// above queueBuffered + this reserve. The buffer does not trigger a Disassemble on its own —
+// only a queue shortfall does — so a vault between the two simply gets no ticket.
+const IDLE_BUFFER_PCT = 5;
+
 async function main() {
   const results = [];
   for (const vault of VAULTS) {
@@ -117,12 +125,14 @@ async function main() {
 
     const price = balance > 0 ? usd / balance : 0; // USD per native unit, from the idle leg itself
 
+    const bufferReserve = price > 0 ? ((usd + deployedUsd) * IDLE_BUFFER_PCT / 100) / price : 0;
+
     let allocatable = 0, alloc90 = 0, allocatablePct = 0, shortfall = 0, disassembleAmount = 0;
     if (balance >= queueBuffered) {
-      allocatable = balance - queueBuffered;
+      allocatable = Math.max(0, balance - queueBuffered - bufferReserve);
       alloc90     = floor6(allocatable * 0.9);
       const allocatableUsd = allocatable * price;
-      allocatablePct = (allocatableUsd + deployedUsd) > 0 ? (allocatableUsd / (allocatableUsd + deployedUsd)) * 100 : 0;
+      allocatablePct = (usd + deployedUsd) > 0 ? (allocatableUsd / (usd + deployedUsd)) * 100 : 0;
     } else {
       // disassembleAmount already accounts for what's idle — it's the top-up needed to reach the
       // buffered target, not the target itself, so it's never larger than what's actually short.
@@ -140,6 +150,7 @@ async function main() {
       idlePct,
       queueAmount,
       queueBuffered,
+      bufferReserve,
       allocatable,
       alloc90,
       allocatablePct,
@@ -152,7 +163,7 @@ async function main() {
   // guards this script's own output — it can't stop something else from overwriting the file
   // afterward, but it ensures this pipeline itself never silently produces incomplete data.
   const REQUIRED_KEYS = ['key', 'label', 'symbol', 'balance', 'usd', 'deployedUsd', 'idlePct',
-    'queueAmount', 'queueBuffered', 'allocatable', 'alloc90', 'allocatablePct', 'shortfall', 'disassembleAmount'];
+    'queueAmount', 'queueBuffered', 'bufferReserve', 'allocatable', 'alloc90', 'allocatablePct', 'shortfall', 'disassembleAmount'];
   for (const v of results) {
     const missing = REQUIRED_KEYS.filter(k => !(k in v));
     if (missing.length) throw new Error(`${v.key}: refusing to write — missing fields: ${missing.join(', ')}`);

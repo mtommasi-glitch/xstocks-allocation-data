@@ -1,11 +1,10 @@
 // Refreshes data.json with each xStocks vault's idle wrapped-xStock balance on Ink, sitting in
-// the vault's boring vault contract, read from DeBank's REST API (not raw chain RPC — this must
-// be able to run from a GitHub Actions runner with plain internet access).
-//
-// Mirrors the same idle-balance extraction logic as kraken-earn-dashboard/server.js: for each
-// vault, find the DeBank protocol whose name contains "xstocks", sum the usd-valued portfolio
-// items there, and take amount/price from each item's first supply token. alloc90 is 90% of the
-// summed balance, floored to 6 decimals (never round up — never allocate more than truly idle).
+// the vault's boring vault contract. The balance is read on-chain (ERC-20 balanceOf on Ink's
+// public RPC) and priced as the underlying xStock's Jupiter price x the wrapper's
+// convertToAssets rate — no DeBank, so running out of DeBank API credits can't block the
+// Allocation routine (it did on 2026-10-15: every refresh failed with DeBank HTTP 403 and no
+// tickets went out). alloc90 is 90% of allocatable, floored to 6 decimals (never round up —
+// never allocate more than truly idle).
 //
 // Also computes idlePct = idleUsd / (idleUsd + deployedUsd), where deployedUsd is the vault's
 // Kamino supervised-loan position's net account value (collateral − borrow), read from Kamino's
@@ -35,15 +34,16 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_FILE = path.join(__dirname, 'data.json');
 
-const DEBANK_KEY = process.env.DEBANK_API_KEY;
-if (!DEBANK_KEY) throw new Error('DEBANK_API_KEY not set');
+const INK_RPC = 'https://rpc-qnd.inkonchain.com';
+const JUP_SEARCH_URL = 'https://lite-api.jup.ag/tokens/v2/search';
 
 const KAMINO_MARKET = '8BNUWRSibVasaAmhYpBCFpGgMisGKfVAf9ho3Cmf6vjr';
 
 const VAULTS = [
-  { key: 'spyx',  label: 'Kraken Earn SPYx',  symbol: 'wSPYx',  boringVault: '0x83b890ca44fb0355cdf5606617cca0fe21ddb16a', positionManager: 'HzJt4yX9AyCEFnKtTuJQto6nTpvyjVBZtrkY2ZzcoRyb' },
-  { key: 'qqqx',  label: 'Kraken Earn QQQx',  symbol: 'wQQQx',  boringVault: '0x6d33d2142a5b0b52856a6902eb6f6203b2232a5b', positionManager: '8tRwmexXaSStiSK29sixkCbDJciqA8DGgLKrW2JEw2QC' },
-  { key: 'nvdax', label: 'Kraken Earn NVDAx', symbol: 'wNVDAx', boringVault: '0xbeb4a79e150564857488e6142d26787a78d54a66', positionManager: 'FTeDtYDsHotvxdLBqpAccPsYrtU5VDfjZjrZUENC1fpD' },
+  // token: the wrapped xStock (ERC-4626, 18 decimals) on Ink; mint: the underlying xStock on Solana (Jupiter price)
+  { key: 'spyx',  label: 'Kraken Earn SPYx',  symbol: 'wSPYx',  boringVault: '0x83b890ca44fb0355cdf5606617cca0fe21ddb16a', positionManager: 'HzJt4yX9AyCEFnKtTuJQto6nTpvyjVBZtrkY2ZzcoRyb', token: '0xe7e553cd128f0011777323a0b44a7b96ea1cb540', mint: 'XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W' },
+  { key: 'qqqx',  label: 'Kraken Earn QQQx',  symbol: 'wQQQx',  boringVault: '0x6d33d2142a5b0b52856a6902eb6f6203b2232a5b', positionManager: '8tRwmexXaSStiSK29sixkCbDJciqA8DGgLKrW2JEw2QC', token: '0x4c1ae29c159838fc1b224636e28e086eb69101f7', mint: 'Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ' },
+  { key: 'nvdax', label: 'Kraken Earn NVDAx', symbol: 'wNVDAx', boringVault: '0xbeb4a79e150564857488e6142d26787a78d54a66', positionManager: 'FTeDtYDsHotvxdLBqpAccPsYrtU5VDfjZjrZUENC1fpD', token: '0xa8ddb5cd96b5222afe198316e9a57caa642850d5', mint: 'Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh' },
 ];
 
 async function fetchKaminoNetValue(marketPubkey, walletAddr) {
@@ -66,37 +66,44 @@ async function fetchQueueAmount(chain, boringVaultAddr) {
   return openReqs.reduce((sum, r) => sum + parseFloat(r.wantTokenAmount || '0'), 0);
 }
 
-async function debank(endpoint, params, retriesLeft = 2) {
-  const url = new URL(`https://pro-openapi.debank.com${endpoint}`);
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  const res = await fetch(url.toString(), { headers: { AccessKey: DEBANK_KEY } });
-  if (!res.ok && retriesLeft > 0) {
-    await new Promise(r => setTimeout(r, 1000));
-    return debank(endpoint, params, retriesLeft - 1);
-  }
-  if (!res.ok) throw new Error(`DeBank HTTP ${res.status} on ${endpoint}`);
-  return res.json();
+async function inkCall(to, data) {
+  const res = await fetch(INK_RPC, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_call', params: [{ to, data }, 'latest'] }),
+  });
+  if (!res.ok) throw new Error(`Ink RPC HTTP ${res.status}`);
+  const j = await res.json();
+  if (j.error || !j.result || j.result === '0x') throw new Error(`Ink RPC error: ${j.error?.message || 'empty result'}`);
+  return BigInt(j.result);
+}
+
+async function fetchUnderlyingPrice(mint) {
+  const res = await fetch(`${JUP_SEARCH_URL}?query=${mint}`);
+  if (!res.ok) throw new Error(`Jupiter HTTP ${res.status}`);
+  const arr = await res.json();
+  const price = Array.isArray(arr) ? arr.find(t => t.id === mint)?.usdPrice : null;
+  if (!(price > 0)) throw new Error(`Jupiter returned no price for ${mint}`);
+  return price;
 }
 
 function floor6(n) {
   return Math.floor(n * 1e6) / 1e6;
 }
 
+const BALANCE_OF = '0x70a08231';
+const CONVERT_TO_ASSETS = '0x07a2d13a';
+const ONE = 10n ** 18n;
+
 async function fetchVaultIdle(vault) {
-  const protocols = await debank('/v1/user/all_complex_protocol_list', { id: vault.boringVault });
-  let balance = 0, usd = 0;
-  for (const prot of protocols || []) {
-    if (!prot.name?.toLowerCase().includes('xstocks')) continue;
-    for (const item of prot.portfolio_item_list || []) {
-      const itemUsd = item.stats?.net_usd_value || 0;
-      if (itemUsd < 1) continue;
-      const tok = item.detail?.supply_token_list?.[0];
-      if (!tok) continue;
-      balance += tok.amount || 0;
-      usd += itemUsd;
-    }
-  }
-  return { balance, usd };
+  const [raw, assetsPerShare, underlyingPrice] = await Promise.all([
+    inkCall(vault.token, BALANCE_OF + vault.boringVault.slice(2).toLowerCase().padStart(64, '0')),
+    inkCall(vault.token, CONVERT_TO_ASSETS + ONE.toString(16).padStart(64, '0')),
+    fetchUnderlyingPrice(vault.mint),
+  ]);
+  const balance = Number(raw) / 1e18;
+  const price   = underlyingPrice * Number(assetsPerShare) / 1e18; // USD per wrapped token
+  return { balance, usd: balance * price };
 }
 
 const QUEUE_BUFFER_MULT = 1.20; // 20% cushion above the live queue reading — this is the one and
@@ -116,7 +123,7 @@ async function main() {
   const results = [];
   for (const vault of VAULTS) {
     const { balance, usd } = await fetchVaultIdle(vault);
-    if (balance <= 0) throw new Error(`${vault.key}: no idle xStocks balance found on DeBank — refusing to write a zeroed allocation`);
+    if (balance <= 0) throw new Error(`${vault.key}: no idle xStocks balance found on-chain — refusing to write a zeroed allocation`);
     const deployedUsd = await fetchKaminoNetValue(KAMINO_MARKET, vault.positionManager);
     const idlePct = (usd / (usd + deployedUsd)) * 100;
 

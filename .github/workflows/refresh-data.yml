@@ -2,10 +2,10 @@ name: Refresh xStocks Allocation Data
 
 # Keeps data.json's idle-balance snapshot fresh (7 days/week, weekends included) so the
 # xStocks Allocation Slack routine's 3-hour staleness check never blocks a scheduled post.
-# Runs here rather than in a Claude cloud routine because it needs the DEBANK_API_KEY secret
-# and plain outbound HTTPS to pro-openapi.debank.com — a GitHub-hosted runner, not a routine
-# sandbox behind an egress proxy (see kraken-earn-dashboard's boosted-usdc-aave-alert.yml for
-# the same pattern applied to a different vault's on-chain check).
+# Runs here rather than in a Claude cloud routine because it needs plain outbound HTTPS to the
+# Ink RPC, Jupiter, Kamino and Veda APIs — a GitHub-hosted runner, not a routine sandbox behind
+# an egress proxy. Balances are read on-chain (no DeBank since 2026-10-15, when exhausted DeBank
+# credits made every refresh fail and blocked the AM tickets).
 #
 # GitHub's scheduler is best-effort: scheduled runs are routinely delayed or silently dropped
 # (on 2026-09-28 neither the hourly run nor the single 12:15 pre-cycle run fired between 07:02
@@ -39,7 +39,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      # Retry transient DeBank/Kamino API failures: up to 3 attempts, 60s apart.
+      # Retry transient Ink RPC / Jupiter / Kamino / Veda API failures: up to 3 attempts, 60s apart.
       - name: Refresh data.json
         run: |
           for attempt in 1 2 3; do
@@ -48,8 +48,6 @@ jobs:
             [ "$attempt" -lt 3 ] && sleep 60
           done
           exit 1
-        env:
-          DEBANK_API_KEY: ${{ secrets.DEBANK_API_KEY }}
       - name: Commit data.json
         run: |
           git config user.name "github-actions[bot]"

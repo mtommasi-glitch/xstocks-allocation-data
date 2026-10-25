@@ -39,18 +39,18 @@
       "label": "Kraken Earn NVDAx",
       "symbol": "wNVDAx",
       "balance": 60.86828778238912,
-      "usd": 12955.250103861332,
+      "usd": 12955.83187426763,
       "deployedUsd": 153204.47080003392,
-      "idlePct": 7.796865590159778,
-      "queueAmount": 3.365210854758844,
+      "idlePct": 7.797188417297813,
+      "queueAmount": 3.3652108547588435,
       "queueBuffered": 4.038253025710612,
-      "bufferReserve": 39.033818833050944,
-      "allocatable": 17.796215923627564,
-      "alloc90": 16.016594,
-      "allocatablePct": 2.2795893990980773,
+      "bufferReserve": 39.032202715118935,
+      "allocatable": 17.797832041559573,
+      "alloc90": 16.018048,
+      "allocatablePct": 2.2798908085535317,
       "shortfall": 0,
       "disassembleAmount": 0
     }
   ],
-  "fetchedAt": "2026-10-25T16:33:24.048Z"
+  "fetchedAt": "2026-10-25T16:33:41.134Z"
 }

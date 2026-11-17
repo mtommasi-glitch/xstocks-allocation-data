@@ -15,7 +15,14 @@ name: Refresh xStocks Allocation Data
 # The AM Allocation routine itself also re-checks every 5 min for up to 60 min if it still
 # finds stale data, so a late refresh here is picked up rather than skipping the cycle.
 # (The PM Allocation cycle was retired on 2026-09-28; its pre-cycle run was removed.)
+# Push trigger (added 2026-11-17): the hourly external workflow_dispatch stopped at 08:29 UTC on 17 Nov
+# (it was a session-only cron that expired) and GitHub's scheduler dropped every run until 13:54, so the
+# AM routine skipped. Now, when the AM routine finds stale data, it pushes a branch named
+# claude/refresh-trigger-<epoch>. Push events are delivered reliably (unlike schedule), so this
+# refreshes data.json on main within ~1 minute and then deletes the trigger branch.
 on:
+  push:
+    branches: ['claude/refresh-trigger-**']
   schedule:
     - cron: '20 * * * *'                  # hourly, well inside the 3h staleness window
     - cron: '33,43,53 11 * * 1-5'         # AM pre-cycle burst (routine fires 12:20 UTC weekdays)
@@ -36,6 +43,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -56,7 +65,10 @@ jobs:
           git diff --staged --quiet && exit 0
           git commit -m "Refresh xStocks allocation data"
           for attempt in 1 2 3; do
-            git pull --rebase -X theirs origin main && git push && exit 0
+            git pull --rebase -X theirs origin main && git push origin HEAD:main && exit 0
             sleep 10
           done
           exit 1
+      - name: Delete trigger branch
+        if: always() && github.event_name == 'push'
+        run: git push origin --delete "$GITHUB_REF_NAME" || true
